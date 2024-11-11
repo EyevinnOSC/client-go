@@ -78,8 +78,7 @@ func RemoveInstance(ctx *Context, serviceId string, name string, token string) e
 
 	slog.Debug(fmt.Sprintf("Deleting on instanceUrl: %s", instanceURL))
 
-	var target string
-	return createFetch(instanceURL, "DELETE", nil, &target, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
+	return createFetch(instanceURL, "DELETE", nil, nil, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
 }
 
 func GetInstance(ctx *Context, serviceId string, name string, token string) (map[string]interface{}, error) {
@@ -134,7 +133,7 @@ func GetPortsForInstance(context *Context, serviceId, name, token string) ([]Por
 	portsUrl := fmt.Sprintf("https://%s/ports/%s", instanceUrl.Host, name)
 
 	var ports []Port
-	err = createFetch(portsUrl, "GET", nil, &ports, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
+	err = createFetch(portsUrl, "GET", nil, &ports, Auth{"Authorization", fmt.Sprintf("Bearer %s", token)})
 	if err != nil {
 		return nil, err
 	}
@@ -162,4 +161,16 @@ func GetLogsForInstance(context *Context, serviceId, name, token string) ([]stri
 	}
 
 	return logs, nil
+}
+
+func AddServiceSecret(ctx *Context, serviceId, secretName, secretData string) error {
+	secretUrl := fmt.Sprintf("https://deploy.svc.%s.osaas.io/mysecrets/eyevinn-docker-retransfer", ctx.GetEnvironment())
+
+	body := map[string]string{"secretName": secretName, "secretData": secretData}
+	bodyBytes, _ := json.Marshal(body)
+	bodyBuffer := bytes.NewBuffer(bodyBytes)
+
+	var instance map[string]interface{}
+	err := createFetch(secretUrl, "POST", bodyBuffer, &instance, Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", ctx.GetPersonalAccessToken())})
+	return err
 }
