@@ -133,7 +133,7 @@ func GetPortsForInstance(context *Context, serviceId, name, token string) ([]Por
 	portsUrl := fmt.Sprintf("https://%s/ports/%s", instanceUrl.Host, name)
 
 	var ports []Port
-	err = createFetch(portsUrl, "GET", nil, &ports, Auth{"Authorization", fmt.Sprintf("Bearer %s", token)})
+	err = createFetch(portsUrl, "GET", nil, &ports, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
 	if err != nil {
 		return nil, err
 	}
