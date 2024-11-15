@@ -164,7 +164,7 @@ func GetLogsForInstance(context *Context, serviceId, name, token string) ([]stri
 }
 
 func AddServiceSecret(ctx *Context, serviceId, secretName, secretData string) error {
-	secretUrl := fmt.Sprintf("https://deploy.svc.%s.osaas.io/mysecrets/eyevinn-docker-retransfer", ctx.GetEnvironment())
+	secretUrl := fmt.Sprintf("https://deploy.svc.%s.osaas.io/mysecrets/%s", ctx.GetEnvironment(), serviceId)
 
 	body := map[string]string{"secretName": secretName, "secretData": secretData}
 	bodyBytes, _ := json.Marshal(body)
