@@ -1,5 +1,5 @@
 <h1 align="center">
-  OSAAS Go Client
+  Eyevinn OSC Go Client
 </h1>
 
 
@@ -27,7 +27,7 @@ Go client library for operating with
 ## Installation
 Import library in your project
 ```
-import "github.com/eyevinn/osaas-client-go"
+import "github.com/EyevinnOSC/client-go"
 ```
 
 ## Usage
@@ -37,7 +37,7 @@ Example of creating, listing and removing an instance
 ```go
 package main
 
-import "github.com/eyevinn/osaas-client-go"
+import "github.com/EyevinnOSC/client-go"
 import "fmt"
 import "os"
 
