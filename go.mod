@@ -1,4 +1,4 @@
-module github.com/eyevinn/osaas-client-go
+module github.com/EyevinnOSC/client-go
 
 go 1.23.2
 
