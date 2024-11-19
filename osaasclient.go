@@ -31,15 +31,10 @@ func (e UnauthorizedError) Error() string {
 }
 
 func GetService(ctx *Context, serviceId string) (*Service, error) {
-	err := ctx.ActivateService(serviceId)
-	if err != nil {
-		return nil, err
-	}
-
 	serviceURL := fmt.Sprintf("https://catalog.svc.%s.osaas.io/mysubscriptions", ctx.GetEnvironment())
 
 	var services []Service
-	err = createFetch(serviceURL, "GET", nil, &services,
+	err := createFetch(serviceURL, "GET", nil, &services,
 		Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", ctx.GetPersonalAccessToken())})
 	if err != nil {
 		return nil, err
