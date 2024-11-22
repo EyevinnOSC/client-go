@@ -65,6 +65,10 @@ func CreateInstance(ctx *Context, serviceId string, token string,
 		return nil, err
 	}
 
+	if instance["reason"] != nil {
+		return nil, errors.New(instance["reason"].(string))
+	}
+
 	return instance, nil
 }
 
