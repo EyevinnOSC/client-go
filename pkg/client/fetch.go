@@ -1,4 +1,4 @@
-package osaasclient
+package client
 
 import (
 	"bytes"
