@@ -64,6 +64,7 @@ type Subscriptions struct {
 type OSCClient struct {
 	PersonalAccessToken string
 	Environment         string
+	TokenCache          map[string]ServiceAccessToken
 }
 
 type Port struct {

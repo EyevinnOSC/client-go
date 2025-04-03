@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"time"
+
+	. "github.com/EyevinnOSC/client-go/internal/fetch"
 )
 
 func NewOSCClient(config *OSCClientConfig) (*OSCClient, error) {
@@ -25,6 +28,7 @@ func NewOSCClient(config *OSCClientConfig) (*OSCClient, error) {
 	return &OSCClient{
 		PersonalAccessToken: token,
 		Environment:         env,
+		TokenCache:          make(map[string]ServiceAccessToken),
 	}, nil
 }
 
@@ -36,15 +40,30 @@ func (oscClient *OSCClient) GetEnvironment() string {
 	return oscClient.Environment
 }
 
-func (oscClient *OSCClient) GetServiceAccessToken(serviceId string) (string, error) {
+func (oscClient *OSCClient) GetCachedToken(serviceId string) (ServiceAccessToken, bool) {
+	token, ok := oscClient.TokenCache[serviceId]
+	if ok && token.Expiry > time.Now().Unix()+30 {
+		return token, true
+	}
+	return ServiceAccessToken{}, false
+}
+
+func (oscClient *OSCClient) GetServiceAccessToken(serviceId string, forceRefresh bool) (ServiceAccessToken, error) {
+	if !forceRefresh {
+		token, ok := oscClient.GetCachedToken(serviceId)
+		if ok {
+			return token, nil
+		}
+	}
+
 	serviceUrl := fmt.Sprintf("https://catalog.svc.%s.osaas.io/mysubscriptions", oscClient.Environment)
 
 	var services []Service
 
-	err := createFetch(serviceUrl, "GET", nil, &services,
-		Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", oscClient.PersonalAccessToken)})
+	err := FetchJson(serviceUrl, "GET", nil, &services,
+		Auth{Header: "x-pat-jwt", Value: fmt.Sprintf("Bearer %s", oscClient.PersonalAccessToken)})
 	if err != nil {
-		return "", err
+		return ServiceAccessToken{}, err
 	}
 
 	var service *Service
@@ -58,7 +77,7 @@ func (oscClient *OSCClient) GetServiceAccessToken(serviceId string) (string, err
 	if service == nil {
 		err = oscClient.ActivateService(serviceId)
 		if err != nil {
-			return "", err
+			return ServiceAccessToken{}, err
 		}
 	}
 
@@ -69,13 +88,14 @@ func (oscClient *OSCClient) GetServiceAccessToken(serviceId string) (string, err
 	})
 
 	var serviceAccessToken ServiceAccessToken
-	err = createFetch(satUrl, "POST", bytes.NewBuffer(body),
-		&serviceAccessToken, Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", oscClient.PersonalAccessToken)})
+	err = FetchJson(satUrl, "POST", bytes.NewBuffer(body),
+		&serviceAccessToken, Auth{Header: "x-pat-jwt", Value: fmt.Sprintf("Bearer %s", oscClient.PersonalAccessToken)})
 	if err != nil {
-		return "", err
+		return ServiceAccessToken{}, err
 	}
+	oscClient.TokenCache[serviceId] = serviceAccessToken
 
-	return serviceAccessToken.Token, nil
+	return serviceAccessToken, nil
 }
 
 func (oscClient *OSCClient) ActivateService(serviceId string) error {
@@ -85,20 +105,21 @@ func (oscClient *OSCClient) ActivateService(serviceId string) error {
 		Services: []string{serviceId},
 	})
 
-	return createFetch(serviceUrl, "POST", bytes.NewBuffer(body), nil,
-		Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", oscClient.PersonalAccessToken)})
+	return FetchJson(serviceUrl, "POST", bytes.NewBuffer(body), nil,
+		Auth{Header: "x-pat-jwt", Value: fmt.Sprintf("Bearer %s", oscClient.PersonalAccessToken)})
 }
 
-func (oscClient *OSCClient) RefreshServiceAccessToken(serviceId string) (string, error) {
-	return oscClient.GetServiceAccessToken(serviceId)
-}
-
+/*
+	func (oscClient *OSCClient) RefreshServiceAccessToken(serviceId string) (string, error) {
+		return oscClient.GetServiceAccessToken(serviceId)
+	}
+*/
 func (oscClient *OSCClient) GetService(serviceId string) (*Service, error) {
 	serviceURL := fmt.Sprintf("https://catalog.svc.%s.osaas.io/mysubscriptions", oscClient.GetEnvironment())
 
 	var services []Service
-	err := createFetch(serviceURL, "GET", nil, &services,
-		Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", oscClient.GetPersonalAccessToken())})
+	err := FetchJson(serviceURL, "GET", nil, &services,
+		Auth{Header: "x-pat-jwt", Value: fmt.Sprintf("Bearer %s", oscClient.GetPersonalAccessToken())})
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +132,7 @@ func (oscClient *OSCClient) GetService(serviceId string) (*Service, error) {
 	return nil, fmt.Errorf("service not found in your subscriptions")
 }
 
-func (oscClient *OSCClient) CreateInstance(serviceId string, token string,
+func (oscClient *OSCClient) CreateInstance(serviceId string,
 	body map[string]interface{}) (map[string]interface{}, error) {
 	service, err := oscClient.GetService(serviceId)
 	if err != nil {
@@ -121,9 +142,12 @@ func (oscClient *OSCClient) CreateInstance(serviceId string, token string,
 	instanceURL := service.ApiUrl
 	bodyBytes, _ := json.Marshal(body)
 	bodyBuffer := bytes.NewBuffer(bodyBytes)
-
+	token, err := oscClient.GetServiceAccessToken(serviceId, false)
+	if err != nil {
+		return nil, err
+	}
 	var instance map[string]interface{}
-	err = createFetch(instanceURL, "POST", bodyBuffer, &instance, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
+	err = FetchJson(instanceURL, "POST", bodyBuffer, &instance, Auth{Header: "x-jwt", Value: fmt.Sprintf("Bearer %s", token.Token)})
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +159,7 @@ func (oscClient *OSCClient) CreateInstance(serviceId string, token string,
 	return instance, nil
 }
 
-func (oscClient *OSCClient) RemoveInstance(serviceId string, name string, token string) error {
+func (oscClient *OSCClient) RemoveInstance(serviceId string, name string) error {
 	service, err := oscClient.GetService(serviceId)
 	if err != nil {
 		return err
@@ -144,11 +168,14 @@ func (oscClient *OSCClient) RemoveInstance(serviceId string, name string, token 
 	instanceURL := fmt.Sprintf("%s/%s", service.ApiUrl, name)
 
 	slog.Debug("Deleting instance", "instanceUrl", instanceURL)
-
-	return createFetch(instanceURL, "DELETE", nil, nil, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
+	token, err := oscClient.GetServiceAccessToken(serviceId, false)
+	if err != nil {
+		return err
+	}
+	return FetchJson(instanceURL, "DELETE", nil, nil, Auth{Header: "x-jwt", Value: fmt.Sprintf("Bearer %s", token.Token)})
 }
 
-func (oscClient *OSCClient) GetInstance(serviceId string, name string, token string) (map[string]interface{}, error) {
+func (oscClient *OSCClient) GetInstance(serviceId string, name string) (map[string]interface{}, error) {
 	service, err := oscClient.GetService(serviceId)
 	if err != nil {
 		return nil, err
@@ -156,8 +183,13 @@ func (oscClient *OSCClient) GetInstance(serviceId string, name string, token str
 
 	instanceURL := fmt.Sprintf("%s/%s", service.ApiUrl, name)
 
+	token, err := oscClient.GetServiceAccessToken(serviceId, false)
+	if err != nil {
+		return nil, err
+	}
+
 	var instance map[string]interface{}
-	err = createFetch(instanceURL, "GET", nil, &instance, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
+	err = FetchJson(instanceURL, "GET", nil, &instance, Auth{Header: "x-jwt", Value: fmt.Sprintf("Bearer %s", token.Token)})
 	if err != nil {
 		if fetchErr, ok := err.(FetchError); ok {
 			if fetchErr.HTTPCode == 404 {
@@ -169,16 +201,20 @@ func (oscClient *OSCClient) GetInstance(serviceId string, name string, token str
 	return instance, nil
 }
 
-func (oscClient *OSCClient) ListInstances(serviceId, token string) ([]map[string]interface{}, error) {
+func (oscClient *OSCClient) ListInstances(serviceId string) ([]map[string]interface{}, error) {
 	service, err := oscClient.GetService(serviceId)
 	if err != nil {
 		return nil, err
 	}
 
 	instanceUrl := service.ApiUrl
+	token, err := oscClient.GetServiceAccessToken(serviceId, false)
+	if err != nil {
+		return nil, err
+	}
 
 	var instances []map[string]interface{}
-	err = createFetch(instanceUrl, "GET", nil, &instances, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
+	err = FetchJson(instanceUrl, "GET", nil, &instances, Auth{Header: "x-jwt", Value: fmt.Sprintf("Bearer %s", token.Token)})
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +222,7 @@ func (oscClient *OSCClient) ListInstances(serviceId, token string) ([]map[string
 	return instances, nil
 }
 
-func (oscClient *OSCClient) GetPortsForInstance(serviceId, name, token string) ([]Port, error) {
+func (oscClient *OSCClient) GetPortsForInstance(serviceId string, name string) ([]Port, error) {
 	service, err := oscClient.GetService(serviceId)
 	if err != nil {
 		return nil, err
@@ -198,9 +234,13 @@ func (oscClient *OSCClient) GetPortsForInstance(serviceId, name, token string) (
 	}
 
 	portsUrl := fmt.Sprintf("https://%s/ports/%s", instanceUrl.Host, name)
+	token, err := oscClient.GetServiceAccessToken(serviceId, false)
+	if err != nil {
+		return nil, err
+	}
 
 	var ports []Port
-	err = createFetch(portsUrl, "GET", nil, &ports, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
+	err = FetchJson(portsUrl, "GET", nil, &ports, Auth{Header: "x-jwt", Value: fmt.Sprintf("Bearer %s", token.Token)})
 	if err != nil {
 		return nil, err
 	}
@@ -208,29 +248,32 @@ func (oscClient *OSCClient) GetPortsForInstance(serviceId, name, token string) (
 	return ports, nil
 }
 
-func (oscClient *OSCClient) GetLogsForInstance(serviceId, name, token string) ([]string, error) {
+func (oscClient *OSCClient) GetLogsForInstance(serviceId string, name string, timestamps bool) (string, error) {
 	service, err := oscClient.GetService(serviceId)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	instanceUrl, err := url.Parse(service.ApiUrl)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	logsUrl := fmt.Sprintf("https://%s/logs/%s", instanceUrl.Host, name)
-
-	var logs []string
-	err = createFetch(logsUrl, "GET", nil, &logs, Auth{"x-jwt", fmt.Sprintf("Bearer %s", token)})
+	logsUrl := fmt.Sprintf("https://%s/logs/%s?timestamps=%t", instanceUrl.Host, name, timestamps)
+	token, err := oscClient.GetServiceAccessToken(serviceId, false)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	return logs, nil
+	logBytes, err := FetchBytes(logsUrl, "GET", nil, Auth{Header: "x-jwt", Value: fmt.Sprintf("Bearer %s", token.Token)})
+	if err != nil {
+		return "", err
+	}
+
+	return string(logBytes), nil
 }
 
-func (oscClient *OSCClient) AddServiceSecret(serviceId, secretName, secretData string) error {
+func (oscClient *OSCClient) AddServiceSecret(serviceId string, secretName string, secretData string) error {
 	secretUrl := fmt.Sprintf("https://deploy.svc.%s.osaas.io/mysecrets/%s", oscClient.GetEnvironment(), serviceId)
 
 	body := map[string]string{"secretName": secretName, "secretData": secretData}
@@ -238,6 +281,6 @@ func (oscClient *OSCClient) AddServiceSecret(serviceId, secretName, secretData s
 	bodyBuffer := bytes.NewBuffer(bodyBytes)
 
 	var instance map[string]interface{}
-	err := createFetch(secretUrl, "POST", bodyBuffer, &instance, Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", oscClient.GetPersonalAccessToken())})
+	err := FetchJson(secretUrl, "POST", bodyBuffer, &instance, Auth{Header: "x-pat-jwt", Value: fmt.Sprintf("Bearer %s", oscClient.GetPersonalAccessToken())})
 	return err
 }
