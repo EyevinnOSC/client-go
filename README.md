@@ -27,7 +27,7 @@ Go client library for operating with
 ## Installation
 Import library in your project
 ```
-import "github.com/EyevinnOSC/client-go"
+import osaasclient "github.com/EyevinnOSC/client-go"
 ```
 
 ## Usage
@@ -37,7 +37,7 @@ Example of creating, listing and removing an instance
 ```go
 package main
 
-import "github.com/EyevinnOSC/client-go"
+import osaasclient "github.com/EyevinnOSC/client-go"
 import "fmt"
 import "os"
 
