@@ -175,12 +175,11 @@ func AddServiceSecret(ctx *Context, serviceId, secretName, secretData string) er
 	bodyBuffer := bytes.NewBuffer(bodyBytes)
 
 	var instance map[string]interface{}
-	err := createFetch(
-		secretUrl,
-		"POST",
-		bodyBuffer,
-		&instance,
-		Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", ctx.GetPersonalAccessToken())},
-	)
+	err := createFetch(secretUrl, "POST", bodyBuffer, &instance, Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", ctx.GetPersonalAccessToken())})
 	return err
+}
+
+func DeleteServiceSecret(ctx *Context, serviceId, secretName string) error {
+	secretUrl := fmt.Sprintf("https://deploy.svc.%s.osaas.io/mysecrets/%s/%s", ctx.GetEnvironment(), serviceId, secretName)
+	return createFetch(secretUrl, "DELETE", nil, nil, Auth{"x-pat-jwt", fmt.Sprintf("Bearer %s", ctx.GetPersonalAccessToken())})
 }
